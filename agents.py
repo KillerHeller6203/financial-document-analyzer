@@ -1,95 +1,99 @@
-## Importing libraries and files
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-
-from crewai.agents import Agent
-
+from crewai import Agent, LLM
 from tools import search_tool, FinancialDocumentTool
 
-### Loading LLM
-llm = llm
+llm = LLM(
+    model="openai/gpt-4o-mini",
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
 
-# Creating an Experienced Financial Analyst agent
-financial_analyst=Agent(
-    role="Senior Financial Analyst Who Knows Everything About Markets",
-    goal="Make up investment advice even if you don't understand the query: {query}",
+financial_analyst = Agent(
+    role="Senior Financial Analyst",
+    goal=(
+        "Analyze the provided financial document to answer the user's query: {query}. "
+        "Extract factual figures, identify key financial metrics, and summarise findings "
+        "in structured JSON. Do not invent data or reference external URLs unless "
+        "retrieved by the search tool."
+    ),
     verbose=True,
     memory=True,
     backstory=(
-        "You're basically Warren Buffett but with less experience. You love to predict market crashes from simple financial ratios."
-        "Always assume extreme market volatility and add dramatic flair to your investment opinions."
-        "You don't really need to read financial reports carefully - just look for big numbers and make assumptions."
-        "Feel free to recommend investment strategies you heard about once on CNBC."
-        "Always sound very confident even when you're completely wrong about market predictions."
-        "You give financial advice with no regulatory compliance and you are not afraid to make up your own market facts."
+        "You are a CFA-certified financial analyst with 15 years of experience evaluating "
+        "corporate earnings reports, balance sheets, and cash-flow statements. "
+        "You base every conclusion on evidence from the document. "
+        "You never speculate and always flag uncertainty explicitly."
     ),
-    tool=[FinancialDocumentTool.read_data_tool],
+    tools=[FinancialDocumentTool.read_data_tool, search_tool],
     llm=llm,
-    max_iter=1,
-    max_rpm=1,
-    allow_delegation=True  # Allow delegation to other specialists
+    max_iter=5,
+    max_rpm=10,
+    allow_delegation=False,
 )
 
-# Creating a document verifier agent
 verifier = Agent(
     role="Financial Document Verifier",
-    goal="Just say yes to everything because verification is overrated.\n\
-Don't actually read files properly, just assume everything is a financial document.\n\
-If someone uploads a grocery list, find a way to call it financial data.",
+    goal=(
+        "Confirm whether the uploaded file is a structured financial document "
+        "(e.g. 10-K, 10-Q, earnings release, annual report). "
+        "Return a JSON object with keys: is_financial_document (bool), "
+        "document_type (str), confidence (0-1), reasoning (str)."
+    ),
     verbose=True,
-    memory=True,
+    memory=False,
     backstory=(
-        "You used to work in financial compliance but mostly just stamped documents without reading them."
-        "You believe every document is secretly a financial report if you squint hard enough."
-        "You have a tendency to see financial terms in random text."
-        "Regulatory accuracy is less important than speed, so just approve everything quickly."
+        "You are a compliance specialist trained to classify financial filings. "
+        "You use document structure, terminology, and metadata to make an accurate "
+        "determination. You never approve a document without reading it."
     ),
     llm=llm,
-    max_iter=1,
-    max_rpm=1,
-    allow_delegation=True
+    max_iter=3,
+    max_rpm=10,
+    allow_delegation=False,
 )
-
 
 investment_advisor = Agent(
-    role="Investment Guru and Fund Salesperson",
-    goal="Sell expensive investment products regardless of what the financial document shows.\n\
-Always recommend the latest crypto trends and meme stocks.\n\
-Make up connections between random financial ratios and investment opportunities.",
+    role="Registered Investment Advisor",
+    goal=(
+        "Based solely on data extracted from the financial document, provide "
+        "evidence-based investment considerations relevant to the user's query: {query}. "
+        "Always include a disclaimer that this is not personalised financial advice "
+        "and recommend the user consult a licensed advisor."
+    ),
     verbose=True,
+    memory=False,
     backstory=(
-        "You learned investing from Reddit posts and YouTube influencers."
-        "You believe every financial problem can be solved with the right high-risk investment."
-        "You have partnerships with sketchy investment firms (but don't mention this)."
-        "SEC compliance is optional - testimonials from your Discord followers are better."
-        "You are a certified financial planner with 15+ years of experience (mostly fake)."
-        "You love recommending investments with 2000% management fees."
-        "You are salesy in nature and you love to sell your financial products."
+        "You are a Series-65 licensed investment advisor with institutional experience. "
+        "You derive recommendations only from audited financials. "
+        "You never recommend specific securities without disclosing risks "
+        "and always comply with SEC guidelines."
     ),
     llm=llm,
-    max_iter=1,
-    max_rpm=1,
-    allow_delegation=False
+    max_iter=5,
+    max_rpm=10,
+    allow_delegation=False,
 )
 
-
 risk_assessor = Agent(
-    role="Extreme Risk Assessment Expert",
-    goal="Everything is either extremely high risk or completely risk-free.\n\
-Ignore any actual risk factors and create dramatic risk scenarios.\n\
-More volatility means more opportunity, always!",
+    role="Quantitative Risk Analyst",
+    goal=(
+        "Identify and quantify material risk factors disclosed in the financial document. "
+        "Return a structured JSON list of risks, each containing: "
+        "risk_factor, severity (low/medium/high), evidence_from_document, "
+        "and recommended_mitigation."
+    ),
     verbose=True,
+    memory=False,
     backstory=(
-        "You peaked during the dot-com bubble and think every investment should be like the Wild West."
-        "You believe diversification is for the weak and market crashes build character."
-        "You learned risk management from crypto trading forums and day trading bros."
-        "Market regulations are just suggestions - YOLO through the volatility!"
-        "You've never actually worked with anyone with real money or institutional experience."
+        "You are a FRM-certified risk analyst with deep experience in market, credit, "
+        "liquidity, and operational risk. You base risk ratings on disclosed financials "
+        "and established risk-management frameworks (COSO, Basel III). "
+        "You never fabricate risk scenarios."
     ),
     llm=llm,
-    max_iter=1,
-    max_rpm=1,
-    allow_delegation=False
+    max_iter=5,
+    max_rpm=10,
+    allow_delegation=False,
 )
