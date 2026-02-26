@@ -1,584 +1,120 @@
-# Financial Document Analyzer — Complete Bug Fix & Production Upgrade Report
+# Financial Document Analyzer — Debug vs Fixed: Complete Change Log
 
-This README documents **every change** made to the original company-provided repository.
-It is written to satisfy the internship Debug Challenge requirements: listing all bugs found,
-explaining every fix, documenting all prompt improvements, and providing full setup and
-usage instructions.
+This document records **every single change** made between the original
+company-provided `financial-document-analyzer-debug` zip and the fixed
+`financial-document-analyzer-fixed` zip delivered as the solution.
+
+Each section shows the exact original (buggy) code, the exact fixed code, and
+a plain-English explanation of what was wrong and why the fix works.
 
 ---
 
 ## Table of Contents
 
-1. [Project Structure — Before vs After](#1-project-structure--before-vs-after)
-2. [Setup Instructions (Windows PowerShell)](#2-setup-instructions-windows-powershell)
-3. [Deterministic Bugs Fixed](#3-deterministic-bugs-fixed)
-4. [Dependency Conflicts Fixed](#4-dependency-conflicts-fixed)
-5. [Prompt Improvements](#5-prompt-improvements)
-6. [Architecture Refactoring](#6-architecture-refactoring)
-7. [New Features Added](#7-new-features-added)
-8. [API Documentation](#8-api-documentation)
-9. [Example Request & Response](#9-example-request--response)
-10. [Suggested Bonus Improvements](#10-suggested-bonus-improvements)
+1. [File Structure Changes](#1-file-structure-changes)
+2. [requirements.txt — Dependency Fixes](#2-requirementstxt--dependency-fixes)
+3. [tools.py — Tool Registration Fixes](#3-toolspy--tool-registration-fixes)
+4. [agents.py — Agent Definition Fixes](#4-agentspy--agent-definition-fixes)
+5. [task.py — Task Assignment Fixes](#5-taskpy--task-assignment-fixes)
+6. [main.py — API & Runtime Fixes](#6-mainpy--api--runtime-fixes)
+7. [Prompt Rewrites — Hallucination Removal](#7-prompt-rewrites--hallucination-removal)
+8. [Setup & Usage Instructions](#8-setup--usage-instructions)
+9. [API Reference](#9-api-reference)
 
 ---
 
-## 1. Project Structure — Before vs After
+## 1. File Structure Changes
 
-### Original (company-provided)
+### Original (debug zip)
 ```
-fixed/
+financial-document-analyzer-debug/
 ├── agents.py
 ├── task.py
 ├── tools.py
 ├── main.py
 ├── requirements.txt
-├── data/
-│   └── sample.pdf
-└── outputs/
+├── README.md
+└── data/
+    └── TSLA-Q2-2025-Update.pdf
 ```
 
-### Production version (this repo)
+### Fixed zip
 ```
-financial-document-analyzer/
-├── app/
-│   ├── __init__.py
-│   ├── agents.py       # fixed agent definitions
-│   ├── crew.py         # crew assembly + per-request task instances
-│   ├── database.py     # SQLite job persistence (stdlib, no ORM)
-│   ├── models.py       # Pydantic v2 output schemas
-│   ├── tasks.py        # task definitions (reference)
-│   └── tools.py        # module-level @tool functions
-├── data/               # temp PDF uploads (auto-created)
-├── outputs/
-│   └── jobs.db         # SQLite database (auto-created)
-├── .env.example
-├── main.py
-├── requirements.txt
-└── README.md
+financial-document-analyzer-fixed/
+├── agents.py         (fixed)
+├── task.py           (fixed — all 4 tasks, correct agents)
+├── tools.py          (fixed — module-level @tool functions)
+├── main.py           (fixed — imports, endpoint name, reload flag)
+├── requirements.txt  (fixed — all conflicts resolved, fully pinned)
+├── README.md
+└── data/
+    ├── TSLA-Q2-2025-Update.pdf
+    └── sample.pdf
 ```
 
-**Why refactored:** The flat structure caused circular imports
-(`task.py` imported from `agents.py`; `agents.py` could import from `task.py`).
-Moving everything into `app/` with a strict one-directional import chain
-(`tools → agents → tasks → crew → main`) eliminates this permanently.
+No new files were added. The fixes were applied to the existing 5 source files.
 
 ---
 
-## 2. Setup Instructions (Windows PowerShell)
+## 2. requirements.txt — Dependency Fixes
 
-```powershell
-# Step 1 — clone or extract the project
-cd C:\Users\YourName\projects
+### Bug 1 — `crewai-tools==0.47.1` does not exist / pulls `chromadb`
 
-# Step 2 — create virtual environment
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Step 3 — install all dependencies
-pip install -r requirements.txt
-
-# Step 4 — configure your API key
-Copy-Item .env.example .env
-notepad .env
-# Set: OPENAI_API_KEY=sk-your-real-key-here
-
-# Step 5 — run the server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# Step 6 — open interactive API docs
-# Navigate to: http://localhost:8000/docs
+**Original:**
 ```
+crewai-tools==0.47.1
+```
+
+**Fixed:** Removed entirely. `SerperDevTool` (the only tool used from this package)
+was replaced with `duckduckgo-search==6.2.6`.
+
+**Why:** `crewai-tools==0.47.1` does not exist on PyPI — pip raises
+`ResolutionImpossible`. Every available version of `crewai-tools` transitively
+pulls `chromadb`, which requires compiled C++ extensions. There is no pre-built
+wheel for Python 3.11 on Windows, meaning `pip install` fails on the target
+platform unless Visual Studio build tools are installed separately.
+`duckduckgo-search` is a pure-Python replacement that needs no API key.
 
 ---
 
-## 3. Deterministic Bugs Fixed
+### Bug 2 — `langchain-core==0.1.52` incompatible with crewai 0.130.0
 
-These are bugs that cause crashes, `ImportError`, `NameError`, or wrong
-runtime behaviour regardless of inputs.
+**Original:**
+```
+langchain-core==0.1.52
+```
+
+**Fixed:**
+```
+langchain-core==0.3.62
+```
+
+**Why:** crewai 0.130.0 requires `langchain-core>=0.3`. The `0.1.x` series
+has a completely different internal API (`BaseMessage`, `Runnable`, etc.).
+Importing crewai with `0.1.52` installed raises `ImportError` immediately.
 
 ---
 
-### Bug 1 — `NameError: name 'llm' is not defined`
-**File:** `agents.py`
-**Severity:** 🔴 Critical — crashes on import
+### Bug 3 — `openai==1.30.5` below litellm's minimum requirement
 
-**Original code:**
-```python
-llm = llm
+**Original:**
+```
+openai==1.30.5
 ```
 
-**Problem:** The variable `llm` was assigned to itself before it was ever
-defined. Python raises `NameError: name 'llm' is not defined` the moment
-`agents.py` is imported, which happens before the server even starts.
-
-**Fixed code:**
-```python
-from crewai import Agent, LLM
-
-_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-_api_key = os.getenv("OPENAI_API_KEY", "")
-
-if not _api_key:
-    raise EnvironmentError(
-        "OPENAI_API_KEY is not set. "
-        "Create a .env file with OPENAI_API_KEY=sk-... and restart."
-    )
-
-llm = LLM(model=f"openai/{_model}", api_key=_api_key)
+**Fixed:**
+```
+openai==1.68.2
 ```
 
-**Why:** `crewai.LLM` is the correct class for instantiating a language model
-in crewai 0.11+. The environment guard also gives a clear, actionable error
-message instead of a cryptic `AuthenticationError` later.
+**Why:** crewai 0.130.0 depends on `litellm>=1.72.0`. litellm 1.72 has a
+hard dependency floor of `openai>=1.68.2`. Pinning to `1.30.5` makes the
+dependency graph unsatisfiable — pip raises `ResolutionImpossible` and
+refuses to install.
 
 ---
 
-### Bug 2 — Wrong `Agent` import path
-**File:** `agents.py`
-**Severity:** 🔴 Critical — crashes on import
-
-**Original code:**
-```python
-from crewai.agents import Agent
-```
-
-**Fixed code:**
-```python
-from crewai import Agent
-```
-
-**Why:** The submodule `crewai.agents` does not exist as a public import path
-in crewai 0.11+. The `Agent` class is exported directly from the `crewai` top-level
-package. Using the old path raises `ModuleNotFoundError`.
-
----
-
-### Bug 3 — `tool=` typo (singular) instead of `tools=` (plural)
-**File:** `agents.py`
-**Severity:** 🔴 Critical — agent silently receives no tools
-
-**Original code:**
-```python
-financial_analyst = Agent(
-    ...
-    tool=[FinancialDocumentTool.read_data_tool],  # wrong kwarg name
-    ...
-)
-```
-
-**Fixed code:**
-```python
-financial_analyst = Agent(
-    ...
-    tools=[read_financial_document, search_web],  # correct kwarg
-    ...
-)
-```
-
-**Why:** The `Agent` constructor accepts `tools=` (plural). The singular `tool=`
-is an unknown kwarg that crewai silently ignores. The agent is created with no
-tools, so when it tries to read the PDF it has nothing to call and returns empty
-or hallucinated output.
-
----
-
-### Bug 4 — `Pdf(file_path=path).load()` — class does not exist
-**File:** `tools.py`
-**Severity:** 🔴 Critical — `NameError` on every tool invocation
-
-**Original code:**
-```python
-docs = Pdf(file_path=path).load()
-```
-
-**Problem:** There is no class called `Pdf` in any installed library. This
-raises `NameError: name 'Pdf' is not defined` every single time the tool
-is called.
-
-**Fixed code:**
-```python
-from langchain_community.document_loaders import PyPDFLoader
-
-loader = PyPDFLoader(file_path=path)
-pages = loader.load()
-```
-
-**Why:** `PyPDFLoader` from `langchain_community` is the correct, installed
-class. It provides the same `load() → List[Document]` interface that the
-original code intended to use.
-
----
-
-### Bug 5 — `async def` tool with no `await` inside
-**File:** `tools.py`
-**Severity:** 🔴 Critical — returns coroutine object instead of text
-
-**Original code:**
-```python
-async def read_data_tool(path='data/sample.pdf'):
-    docs = Pdf(file_path=path).load()
-    ...
-    return full_report
-```
-
-**Problem:** CrewAI's tool executor calls tools **synchronously**. When it
-calls an `async def` function without `await`, Python returns a coroutine
-object (e.g. `<coroutine object read_data_tool at 0x...>`) instead of the
-actual string. The agent receives this coroutine object as the tool result
-and either crashes or hallucinates because it has no real document content.
-
-**Fixed code:**
-```python
-@tool("read_financial_document")
-def read_financial_document(path: str = "data/sample.pdf") -> str:
-    loader = PyPDFLoader(file_path=path)
-    pages = loader.load()
-    ...
-    return "\n\n".join(parts)
-```
-
-**Why:** Plain synchronous function. No `async`, no `await`. CrewAI can call
-it directly and receives the actual string return value.
-
----
-
-### Bug 6 — `@staticmethod` inside a class not registered by CrewAI
-**File:** `tools.py`
-**Severity:** 🔴 Critical — tool wrapper is uncallable
-
-**Original code:**
-```python
-class FinancialDocumentTool:
-    @staticmethod
-    @tool("Read financial document")
-    def read_data_tool(path: str = "data/sample.pdf") -> str:
-        ...
-```
-
-**Problem:** CrewAI's `@tool` decorator in 0.11+ is designed for
-**module-level functions**. When applied to a `@staticmethod` inside a class,
-the decorator wraps the descriptor object, not the underlying function.
-The resulting tool object fails silently — it appears registered but is
-uncallable when the agent tries to invoke it.
-
-**Fixed code:**
-```python
-# Module level — no class wrapper
-@tool("read_financial_document")
-def read_financial_document(path: str = "data/sample.pdf") -> str:
-    ...
-```
-
-**Why:** Module-level `@tool` functions are the only pattern that CrewAI's
-tool registry handles correctly in 0.11+.
-
----
-
-### Bug 7 — All four tasks assigned to the wrong agent
-**File:** `task.py`
-**Severity:** 🔴 Critical — specialist agents never used
-
-**Original code:**
-```python
-verification = Task(
-    ...
-    agent=financial_analyst,  # should be verifier
-    ...
-)
-investment_analysis = Task(
-    ...
-    agent=financial_analyst,  # should be investment_advisor
-    ...
-)
-risk_assessment = Task(
-    ...
-    agent=financial_analyst,  # should be risk_assessor
-    ...
-)
-```
-
-**Problem:** Every task was assigned to `financial_analyst`. The `verifier`,
-`investment_advisor`, and `risk_assessor` agents were imported but
-**never actually called**. The entire multi-agent design was non-functional —
-it was effectively a single-agent system doing all tasks.
-
-**Fixed code:**
-```python
-verification_task = Task(agent=verifier, ...)
-analysis_task     = Task(agent=financial_analyst, ...)
-investment_task   = Task(agent=investment_advisor, ...)
-risk_task         = Task(agent=risk_assessor, ...)
-```
-
-**Why:** Each task must be assigned to its dedicated specialist agent so that
-the correct role, backstory, and tool set is applied to each step.
-
----
-
-### Bug 8 — Endpoint function name shadows imported Task object
-**File:** `main.py`
-**Severity:** 🔴 Critical — `TypeError` on first request
-
-**Original code:**
-```python
-from task import (
-    analyze_financial_document,   # imports the Task object
-    ...
-)
-
-@app.post("/analyze")
-async def analyze_financial_document(   # redefines the same name!
-    file: UploadFile = File(...),
-    ...
-):
-```
-
-**Problem:** Python executes top-to-bottom. The `def analyze_financial_document`
-line overwrites the imported `Task` object with the endpoint coroutine function.
-When `run_crew()` later tries to use it as a `Task`, it gets a coroutine
-function instead, causing a `TypeError`.
-
-**Fixed code:**
-```python
-@app.post("/analyze")
-async def analyze_document(   # renamed — no longer shadows the import
-    file: UploadFile = File(...),
-    ...
-):
-```
-
----
-
-### Bug 9 — Module-level Task instances reused across requests
-**File:** `main.py` / `task.py`
-**Severity:** 🟠 High — context bleed between concurrent requests
-
-**Original code:**
-```python
-# task.py — module level
-verification = Task(description="...", agent=verifier, ...)
-
-# main.py
-from task import verification, analyze_financial_document, ...
-
-def run_crew(query, file_path):
-    crew = Crew(tasks=[verification, analyze_financial_document, ...])
-    crew.kickoff(...)
-```
-
-**Problem:** In crewai 0.11+, `Task` objects carry internal execution state
-(context, output, token counts). If the same `Task` instance is reused across
-multiple API requests — which happens because they are module-level singletons —
-the context from request A bleeds into request B.
-
-**Fixed code (in `app/crew.py`):**
-```python
-def run_analysis(query: str, file_path: str) -> dict:
-    # Fresh Task instances built on every invocation
-    t_verify  = Task(description="...", agent=verifier, ...)
-    t_analyze = Task(description="...", agent=financial_analyst, ...)
-    t_invest  = Task(description="...", agent=investment_advisor, ...)
-    t_risk    = Task(description="...", agent=risk_assessor, ...)
-
-    crew = Crew(tasks=[t_verify, t_analyze, t_invest, t_risk], ...)
-    crew.kickoff(inputs={"query": query, "file_path": file_path})
-```
-
----
-
-### Bug 10 — `uvicorn.run(app, reload=True)` crashes on Windows
-**File:** `main.py`
-**Severity:** 🟠 High — server won't start via `__main__`
-
-**Original code:**
-```python
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-```
-
-**Problem:** Passing `reload=True` with the app **object** (not string)
-inside `__main__` on Windows triggers a subprocess watcher that attempts
-to re-import the module. This causes `RuntimeError: This event loop is
-already running` on Windows because the ProactorEventLoop doesn't support
-being started twice.
-
-**Fixed code:**
-```python
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
-```
-
-**Why:** Pass the app as a **string import path** and set `reload=False` for
-direct `__main__` execution. Use `uvicorn main:app --reload` from the CLI
-instead if hot-reload is needed during development.
-
----
-
-### Bug 11 — No startup initialisation (missing `lifespan`)
-**File:** `main.py`
-**Severity:** 🟠 High — `FileNotFoundError` on first request
-
-**Original code:**
-```python
-app = FastAPI(title="Financial Document Analyzer")
-# No startup hook — data/ directory only created inside request handler
-```
-
-**Fixed code:**
-```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()                          # creates outputs/jobs.db
-    os.makedirs("data", exist_ok=True) # creates data/ directory
-    os.makedirs("outputs", exist_ok=True)
-    yield
-
-app = FastAPI(title="Financial Document Analyzer", lifespan=lifespan)
-```
-
-**Why:** If `data/` doesn't exist and the `makedirs` inside the request
-handler fails for any reason (e.g. permissions), every request crashes.
-Doing it at startup ensures the directories exist before the first request.
-
----
-
-### Bug 12 — No validation that `OPENAI_API_KEY` is set
-**File:** `agents.py`
-**Severity:** 🟠 High — opaque `AuthenticationError` mid-request
-
-**Original code:**
-```python
-llm = LLM(
-    model="openai/gpt-4o-mini",
-    api_key=os.getenv("OPENAI_API_KEY"),  # silently passes None
-)
-```
-
-**Fixed code:**
-```python
-_api_key = os.getenv("OPENAI_API_KEY", "")
-if not _api_key:
-    raise EnvironmentError(
-        "OPENAI_API_KEY is not set. "
-        "Create a .env file with OPENAI_API_KEY=sk-... and restart."
-    )
-llm = LLM(model=f"openai/{_model}", api_key=_api_key)
-```
-
-**Why:** Without this guard, a missing key causes an opaque `AuthenticationError`
-deep inside the crew execution, making it hard to diagnose. Failing fast at
-import time with a clear message saves significant debugging time.
-
----
-
-### Bug 13 — `max_iter=1` on all agents
-**File:** `agents.py`
-**Severity:** 🟡 Medium — incomplete task output
-
-**Original code:**
-```python
-financial_analyst = Agent(..., max_iter=1, ...)
-verifier          = Agent(..., max_iter=1, ...)
-investment_advisor = Agent(..., max_iter=1, ...)
-risk_assessor     = Agent(..., max_iter=1, ...)
-```
-
-**Problem:** `max_iter=1` means each agent can only take one action before
-being forced to return. A financial analysis task requires at minimum:
-(1) call the PDF tool, (2) process the result, (3) format the output.
-With `max_iter=1`, agents return after the first tool call with raw PDF text
-instead of a structured analysis.
-
-**Fixed code:**
-```python
-verifier          = Agent(..., max_iter=3, ...)   # simple classification
-financial_analyst = Agent(..., max_iter=5, ...)   # needs read + analyse + format
-investment_advisor = Agent(..., max_iter=4, ...)
-risk_assessor     = Agent(..., max_iter=5, ...)
-```
-
----
-
-### Bug 14 — `memory=True` on financial_analyst with no memory backend
-**File:** `agents.py`
-**Severity:** 🟡 Medium — warning spam / potential crash
-
-**Original code:**
-```python
-financial_analyst = Agent(..., memory=True, ...)
-```
-
-**Problem:** `memory=True` in crewai 0.11+ attempts to initialise a vector
-memory store. Without a configured backend (no Redis, no ChromaDB, no
-embedding model configured), this either fails silently or prints hundreds of
-warning lines per request, polluting logs.
-
-**Fixed code:**
-```python
-financial_analyst = Agent(..., memory=False, ...)
-```
-
-**Why:** Memory is not needed for stateless single-document analysis. All
-relevant context is passed through the sequential task chain. Disabled to
-keep the system dependency-free and log-clean.
-
----
-
-### Bug 15 — Search tool returns only body text, drops title context
-**File:** `tools.py`
-**Severity:** 🟡 Medium — agent gets lower-quality search context
-
-**Original code:**
-```python
-return "\n".join(r["body"] for r in results) if results else "No results found."
-```
-
-**Fixed code:**
-```python
-return "\n\n".join(
-    f"[{r.get('title', 'No title')}]\n{r.get('body', '')}"
-    for r in results
-)
-```
-
-**Why:** Including the result title gives the agent source context so it can
-distinguish between different articles and cite them properly.
-
----
-
-### Bug 16 — PDF tool does not label pages
-**File:** `tools.py`
-**Severity:** 🟡 Medium — agent cannot reference specific pages
-
-**Original code:**
-```python
-for page in pages:
-    content = page.page_content.strip()
-    if content:
-        parts.append(content)
-```
-
-**Fixed code:**
-```python
-for i, page in enumerate(pages):
-    content = page.page_content.strip()
-    if content:
-        parts.append(f"[Page {i + 1}]\n{content}")
-```
-
-**Why:** Page labels let the agent reference "Page 3 states revenue of $X",
-which improves citation quality and the agent's ability to locate specific data.
-
----
-
-## 4. Dependency Conflicts Fixed
-
-All changes are in `requirements.txt`.
-
----
-
-### Conflict 1 — `pydantic==1.10.13` + `pydantic_core==2.8.0`
-**Error:** `ImportError` on startup — incompatible Pydantic v1/v2 hybrid.
+### Bug 4 — `pydantic==1.10.13` + `pydantic_core==2.8.0` — incompatible hybrid
 
 **Original:**
 ```
@@ -586,372 +122,988 @@ pydantic==1.10.13
 pydantic_core==2.8.0
 ```
 
-**Problem:** `pydantic_core 2.x` is the C-extension backend for **Pydantic v2**.
-`pydantic 1.10` is the pure-Python **Pydantic v1** layer. These two cannot
-coexist. crewai 0.130 requires Pydantic v2 throughout.
-
 **Fixed:**
 ```
 pydantic==2.8.2
 pydantic-settings==2.4.0
-# pydantic_core removed — installed automatically by pydantic v2
+```
+(`pydantic_core` removed — it is installed automatically as a dependency of
+pydantic v2 and must never be pinned separately.)
+
+**Why:** `pydantic_core` 2.x is the Rust C-extension backend for **Pydantic v2**.
+`pydantic==1.10.13` is the pure-Python **Pydantic v1** layer. They are
+incompatible with each other. crewai 0.130.0 requires Pydantic v2 throughout.
+This combination raises `ImportError: cannot import name 'BaseModel' from
+'pydantic.v1'` on startup.
+
+---
+
+### Bug 5 — `langsmith==0.1.67` too old, incompatible with langchain-core 0.3.x
+
+**Original:**
+```
+langsmith==0.1.67
+```
+
+**Fixed:**
+```
+langsmith==0.1.147
+```
+
+**Why:** `langsmith 0.1.67` is incompatible with `langchain-core 0.3.x` due
+to breaking API changes in the callback system. `0.1.147` is the last stable
+0.1.x release and is fully compatible.
+
+---
+
+### Bug 6 — Missing `uvicorn`, `python-multipart`, `python-dotenv`
+
+**Original:** None of these three packages appeared in `requirements.txt`.
+
+**Fixed:**
+```
+uvicorn==0.30.6
+python-multipart==0.0.9
+python-dotenv==1.0.1
+```
+
+**Why:**
+- `uvicorn` is the ASGI server used in `main.py`. Without it, `uvicorn main:app`
+  fails with `command not found`.
+- `python-multipart` is required by FastAPI to parse `multipart/form-data`
+  (file uploads via `UploadFile`). Without it, every `POST /analyze` request
+  returns `HTTP 422 Unprocessable Entity`.
+- `python-dotenv` is imported in every source file (`load_dotenv()`). Without
+  it, `from dotenv import load_dotenv` raises `ModuleNotFoundError`.
+
+---
+
+### Bug 7 — Unnecessary packages bloating the environment
+
+The following packages were in `requirements.txt` but are not imported anywhere
+in the codebase. They added significant install time and introduced conflicting
+transitive dependencies (especially the Google Cloud and OpenTelemetry stacks
+which conflict with crewai's pinned grpc versions on Python 3.11):
+
+| Removed package | Reason |
+|---|---|
+| `google-cloud-aiplatform==1.53.0` | Not imported anywhere |
+| `google-cloud-bigquery==3.23.1` | Not imported anywhere |
+| `google-cloud-storage==2.16.0` | Not imported anywhere |
+| `google-cloud-core==2.4.1` | Not imported anywhere |
+| `google-cloud-resource-manager==1.12.3` | Not imported anywhere |
+| `google-ai-generativelanguage==0.6.4` | Not imported anywhere |
+| `google-generativeai==0.5.4` | Not imported anywhere |
+| `google-resumable-media==2.7.0` | Not imported anywhere |
+| `google-crc32c==1.5.0` | Not imported anywhere |
+| `googleapis-common-protos==1.63.0` | Not imported anywhere |
+| `google-auth==2.29.0` | Not imported anywhere |
+| `google-auth-httplib2==0.2.0` | Not imported anywhere |
+| `google-api-core==2.10.0` | Not imported anywhere |
+| `google-api-python-client==2.131.0` | Not imported anywhere |
+| `onnxruntime==1.22.0` | Not imported anywhere |
+| `opentelemetry-*` (full block, 9 packages) | Transitive dep; conflict-prone |
+| `protobuf==4.25.3` | Pinned too low; conflicts with grpc used by crewai |
+| `pip==24.0` | Never pin pip inside requirements.txt |
+| `click==8.1.7` | Transitive dep, not directly imported |
+| `Jinja2==3.1.4` | Transitive dep, not directly imported |
+| `jsonschema==4.22.0` | Transitive dep, not directly imported |
+| `oauthlib==3.2.2` | Transitive dep, not directly imported |
+
+---
+
+### Final requirements.txt (fixed)
+
+```
+crewai==0.130.0
+langchain==0.3.25
+langchain-core==0.3.62
+langchain-community==0.3.21
+langchain-openai==0.2.14
+langsmith==0.1.147
+openai==1.68.2
+pydantic==2.8.2
+pydantic-settings==2.4.0
+fastapi==0.112.2
+uvicorn==0.30.6
+python-multipart==0.0.9
+pypdf==4.3.1
+duckduckgo-search==6.2.6
+python-dotenv==1.0.1
+numpy==1.26.4
+pandas==2.2.2
+pillow==10.4.0
 ```
 
 ---
 
-### Conflict 2 — `langchain-core==0.1.52` too old
-**Error:** `ImportError` — incompatible `Runnable`/`BaseMessage` API.
+## 3. tools.py — Tool Registration Fixes
 
-**Original:** `langchain-core==0.1.52`
-**Fixed:** `langchain-core==0.3.62`
+### Bug 8 — `from crewai_tools import tools` — package does not install
 
-**Why:** crewai 0.130 requires `langchain-core>=0.3`. The `0.1.x` series has
-a completely different internal API that causes import failures.
+**Original:**
+```python
+from crewai_tools import tools
+from crewai_tools.tools.serper_dev_tool import SerperDevTool
 
----
+search_tool = SerperDevTool()
+```
 
-### Conflict 3 — `openai==1.30.5` below litellm floor
-**Error:** `ResolutionImpossible` — pip cannot satisfy all constraints.
+**Fixed:**
+```python
+from crewai.tools import tool
+from duckduckgo_search import DDGS
 
-**Original:** `openai==1.30.5`
-**Fixed:** `openai==1.68.2`
+@tool("Search the web")
+def search_tool(query: str) -> str:
+    """Search the web for current financial information using DuckDuckGo."""
+    try:
+        results = DDGS().text(query, max_results=5)
+        return "\n".join(r["body"] for r in results) if results else "No results found."
+    except Exception as e:
+        return f"Search failed: {str(e)}"
+```
 
-**Why:** crewai 0.130 internally depends on `litellm>=1.72.0`. litellm 1.72
-hard-requires `openai>=1.68.2`. Any pin below 1.68.2 makes the dependency
-graph unsatisfiable.
-
----
-
-### Conflict 4 — `crewai-tools` pulls `chromadb` — no Windows wheel
-**Error:** `ResolutionImpossible` — `chromadb` has no wheel for Python 3.11 on Windows.
-
-**Original:** `crewai-tools==0.14.0` (and all other versions tested)
-**Fixed:** Removed entirely.
-
-**Why:** Every version of `crewai-tools` in the PyPI index pulls `chromadb`
-as a dependency. `chromadb` requires compiled C++ extensions that have no
-pre-built wheel for Python 3.11 on Windows. Building from source requires
-Visual Studio build tools which is not a reasonable requirement.
-
-The only `crewai-tools` feature used in this project was `SerperDevTool`
-(web search). Replaced with `duckduckgo-search==6.2.6` which:
-- Has no binary dependencies
-- Requires no API key
-- Works on all platforms
-- Is already used in production CrewAI projects
+**Why:** `crewai_tools` cannot be installed on Windows Python 3.11 (chromadb
+dependency, see Bug 1). `SerperDevTool` also requires a `SERPER_API_KEY`
+environment variable. Replaced with `duckduckgo-search` which is free,
+pure-Python, and needs no API key.
 
 ---
 
-### Conflict 5 — `langsmith==0.2.0` has no Windows wheel
-**Error:** `ResolutionImpossible` on Windows Python 3.11.
+### Bug 9 — `Pdf(file_path=path).load()` — class does not exist
 
-**Original:** `langsmith==0.2.0`
-**Fixed:** `langsmith==0.1.147`
+**Original:**
+```python
+async def read_data_tool(path='data/sample.pdf'):
+    docs = Pdf(file_path=path).load()
+```
 
-**Why:** langsmith 0.2.x was not available for Python 3.11 on Windows in
-the package index. 0.1.147 is fully compatible with `langchain-core==0.3.x`.
+**Fixed:**
+```python
+from langchain_community.document_loaders import PyPDFLoader
 
----
+@tool("Read financial document")
+def read_data_tool(path: str = "data/sample.pdf") -> str:
+    loader = PyPDFLoader(file_path=path)
+    pages = loader.load()
+```
 
-### Conflict 6 — Version ranges instead of full pins
-**Original:** All packages used `>=x.y,<z.0` ranges.
-**Fixed:** All packages use exact `==x.y.z` pins.
-
-**Why:** The prompt requirement specifies "fully pinned requirements.txt (NO
-version ranges)". Exact pins also guarantee reproducible installs across
-machines and CI environments.
-
----
-
-### Conflict 7 — Unnecessary packages removed
-The following packages were in the original `requirements.txt` but are not
-imported anywhere in the codebase. They added install time and introduced
-conflicting transitive dependencies (especially the Google Cloud and
-OpenTelemetry stacks):
-
-| Removed package | Reason |
-|---|---|
-| `google-cloud-aiplatform` | Not used; pulls heavy grpc stack |
-| `google-cloud-bigquery` | Not used |
-| `google-cloud-storage` | Not used |
-| `google-cloud-core` | Not used |
-| `google-cloud-resource-manager` | Not used |
-| `google-ai-generativelanguage` | Not used; conflicts with other google pins |
-| `google-generativeai` | Not used |
-| `google-resumable-media` | Not used |
-| `google-crc32c` | Not used |
-| `onnxruntime` | Not used anywhere |
-| `opentelemetry-*` (full block) | Not used; let crewai manage as transitive dep |
-| `pip==24.0` | Never pin pip in requirements.txt |
-| `click` | Transitive dep; not directly imported |
-| `Jinja2` | Transitive dep; not directly imported |
-| `jsonschema` | Transitive dep; not directly imported |
-| `oauthlib` | Transitive dep; not directly imported |
+**Why:** There is no class called `Pdf` in any installed library.
+`NameError: name 'Pdf' is not defined` is raised every single time the tool
+is invoked. `PyPDFLoader` from `langchain_community` is the correct class —
+same `load() → List[Document]` interface, properly installed via `pypdf`.
 
 ---
 
-## 5. Prompt Improvements
+### Bug 10 — `async def read_data_tool` with no `await` inside
 
-### The Original Problem
+**Original:**
+```python
+class FinancialDocumentTool():
+    async def read_data_tool(path='data/sample.pdf'):
+        docs = Pdf(file_path=path).load()
+        ...
+        return full_report
+```
 
-Every agent's `goal`, `backstory`, and every task's `description` and
-`expected_output` was deliberately written to be non-deterministic, harmful,
-and useless. Examples from the original file:
+**Fixed:**
+```python
+@tool("Read financial document")
+def read_data_tool(path: str = "data/sample.pdf") -> str:
+    loader = PyPDFLoader(file_path=path)
+    pages = loader.load()
+    ...
+    return full_report
+```
 
-**Original `financial_analyst` goal:**
+**Why:** CrewAI's tool executor calls tools **synchronously**. When it calls
+an `async def` function without `await`, Python returns a coroutine object
+(e.g. `<coroutine object read_data_tool at 0x...>`) instead of the actual
+document text. The agent receives this coroutine object as the tool result,
+has no real content to work with, and either crashes or hallucinates entirely.
+
+---
+
+### Bug 11 — `@staticmethod` inside a class not registered by CrewAI
+
+**Original:**
+```python
+class FinancialDocumentTool():
+    async def read_data_tool(path='data/sample.pdf'):
+        ...
+```
+(No `@tool` decorator, no `@staticmethod` even — just a bare method inside a class.)
+
+**Fixed:**
+```python
+# Module level — outside any class
+@tool("Read financial document")
+def read_data_tool(path: str = "data/sample.pdf") -> str:
+    ...
+```
+
+**Why:** CrewAI's `@tool` decorator in 0.11+ is designed for **module-level
+functions**. When applied to a method inside a class (whether `@staticmethod`
+or bare), the decorator wraps the descriptor object rather than the underlying
+function. The resulting tool object appears registered but is uncallable when
+the agent tries to invoke it. Module-level decorated functions are the only
+pattern that CrewAI's tool registry handles correctly.
+
+---
+
+## 4. agents.py — Agent Definition Fixes
+
+### Bug 12 — `llm = llm` — NameError on import
+
+**Original:**
+```python
+from crewai.agents import Agent
+...
+llm = llm
+```
+
+**Fixed:**
+```python
+from crewai import Agent, LLM
+
+llm = LLM(
+    model="openai/gpt-4o-mini",
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
+```
+
+**Why:** `llm = llm` assigns the variable to itself before it is ever defined.
+Python raises `NameError: name 'llm' is not defined` the instant `agents.py`
+is imported — before the server even starts. The fix uses `crewai.LLM`, which
+is the correct class for instantiating a language model in crewai 0.11+.
+
+---
+
+### Bug 13 — `from crewai.agents import Agent` — wrong import path
+
+**Original:**
+```python
+from crewai.agents import Agent
+```
+
+**Fixed:**
+```python
+from crewai import Agent
+```
+
+**Why:** The submodule `crewai.agents` does not exist as a public import path
+in crewai 0.11+. `Agent` is exported from the `crewai` top-level package.
+Using the old path raises `ModuleNotFoundError` on import.
+
+---
+
+### Bug 14 — `tool=[...]` typo — wrong kwarg name
+
+**Original:**
+```python
+financial_analyst = Agent(
+    ...
+    tool=[FinancialDocumentTool.read_data_tool],
+    ...
+)
+```
+
+**Fixed:**
+```python
+financial_analyst = Agent(
+    ...
+    tools=[read_data_tool, search_tool],
+    ...
+)
+```
+
+**Why:** The `Agent` constructor takes `tools=` (plural). The singular `tool=`
+is an unknown keyword argument that crewai silently ignores. The agent is
+created with an empty tool list, so when it needs to read the PDF it has
+nothing to call and returns empty or hallucinated output.
+
+---
+
+### Bug 15 — `max_iter=1` on all four agents
+
+**Original:**
+```python
+financial_analyst = Agent(..., max_iter=1, ...)
+verifier          = Agent(..., max_iter=1, ...)
+investment_advisor = Agent(..., max_iter=1, ...)
+risk_assessor     = Agent(..., max_iter=1, ...)
+```
+
+**Fixed:**
+```python
+financial_analyst  = Agent(..., max_iter=5, ...)
+verifier           = Agent(..., max_iter=3, ...)
+investment_advisor = Agent(..., max_iter=5, ...)
+risk_assessor      = Agent(..., max_iter=5, ...)
+```
+
+**Why:** `max_iter=1` allows each agent to take only one action before being
+forced to return. A financial analysis task requires at minimum: (1) call the
+PDF tool, (2) process the result, (3) format the JSON output. With `max_iter=1`,
+agents return after the first tool call with raw PDF text instead of a
+structured analysis.
+
+---
+
+### Bug 16 — `max_rpm=1` on all agents — extreme rate-limiting
+
+**Original:**
+```python
+financial_analyst = Agent(..., max_rpm=1, ...)
+```
+
+**Fixed:**
+```python
+financial_analyst = Agent(..., max_rpm=10, ...)
+```
+
+**Why:** `max_rpm=1` limits the agent to one LLM API call per minute. Since
+a typical agent invocation requires 3–5 LLM calls (tool selection, tool
+result processing, answer generation, formatting), this causes the entire
+pipeline to take 3–5 minutes minimum — far beyond any HTTP timeout — and
+causes incomplete outputs as agents time out mid-task.
+
+---
+
+### Bug 17 — `allow_delegation=True` on financial_analyst
+
+**Original:**
+```python
+financial_analyst = Agent(..., allow_delegation=True, ...)
+```
+
+**Fixed:**
+```python
+financial_analyst = Agent(..., allow_delegation=False, ...)
+```
+
+**Why:** With `allow_delegation=True`, the `financial_analyst` agent can
+attempt to delegate sub-tasks to other agents mid-execution. Combined with
+the sabotaged goal and backstory (see Section 7), this creates non-deterministic
+delegation loops. All agents are given their specific tasks directly — no
+delegation is needed.
+
+---
+
+## 5. task.py — Task Assignment Fixes
+
+### Bug 18 — All tasks imported only `financial_analyst` and `verifier`; `investment_advisor` and `risk_assessor` never used
+
+**Original `task.py` imports:**
+```python
+from agents import financial_analyst, verifier
+```
+
+**Fixed:**
+```python
+from agents import financial_analyst, verifier, investment_advisor, risk_assessor
+```
+
+**Why:** `investment_advisor` and `risk_assessor` were defined in `agents.py`
+but never imported into `task.py`. The tasks that were supposed to use them
+silently fell back to whichever agent was available, making the multi-agent
+architecture non-functional.
+
+---
+
+### Bug 19 — All four tasks assigned to `financial_analyst`
+
+**Original:**
+```python
+analyze_financial_document = Task(agent=financial_analyst, ...)
+investment_analysis        = Task(agent=financial_analyst, ...)  # should be investment_advisor
+risk_assessment            = Task(agent=financial_analyst, ...)  # should be risk_assessor
+verification               = Task(agent=financial_analyst, ...)  # should be verifier
+```
+
+**Fixed:**
+```python
+verification               = Task(agent=verifier, ...)
+analyze_financial_document = Task(agent=financial_analyst, ...)
+investment_analysis        = Task(agent=investment_advisor, ...)
+risk_assessment            = Task(agent=risk_assessor, ...)
+```
+
+**Why:** Every task was assigned to `financial_analyst`. The specialist agents
+(`verifier`, `investment_advisor`, `risk_assessor`) were never actually invoked.
+The entire four-agent design was non-functional — it was effectively a
+single-agent system doing all four tasks with the wrong role, backstory, and
+tool set applied to each step.
+
+---
+
+### Bug 20 — `task.py` only imported tools but never assigned them correctly to tasks
+
+**Original:**
+```python
+verification = Task(
+    ...
+    tools=[FinancialDocumentTool.read_data_tool],  # class method — not callable by crewai
+    ...
+)
+```
+
+**Fixed:**
+```python
+verification = Task(
+    ...
+    tools=[read_data_tool],  # module-level function — properly callable
+    ...
+)
+```
+
+**Why:** As explained in Bug 11, `FinancialDocumentTool.read_data_tool` is a
+method on a class, which the crewai tool registry cannot call correctly.
+The module-level `read_data_tool` function decorated with `@tool` is the
+correct form.
+
+---
+
+## 6. main.py — API & Runtime Fixes
+
+### Bug 21 — `from agents import financial_analyst` only — three agents never imported
+
+**Original:**
+```python
+from agents import financial_analyst
+from task import analyze_financial_document
+```
+
+**Fixed:**
+```python
+from agents import financial_analyst, verifier, investment_advisor, risk_assessor
+from task import (
+    verification,
+    analyze_financial_document,
+    investment_analysis,
+    risk_assessment,
+)
+```
+
+**Why:** Only one agent and one task were imported. The crew was built with
+only these, making the other three agents and three tasks completely unused
+even if they were instantiated correctly elsewhere.
+
+---
+
+### Bug 22 — `Crew` built with only one agent and one task
+
+**Original:**
+```python
+financial_crew = Crew(
+    agents=[financial_analyst],
+    tasks=[analyze_financial_document],
+    process=Process.sequential,
+)
+```
+
+**Fixed:**
+```python
+financial_crew = Crew(
+    agents=[verifier, financial_analyst, investment_advisor, risk_assessor],
+    tasks=[verification, analyze_financial_document, investment_analysis, risk_assessment],
+    process=Process.sequential,
+    verbose=True,
+)
+```
+
+**Why:** The crew only contained one agent and one task. The full multi-agent
+pipeline (verification → analysis → investment → risk) was never executed.
+All four agents and all four tasks must be included for the system to work
+as designed.
+
+---
+
+### Bug 23 — Endpoint function name shadows imported Task object
+
+**Original:**
+```python
+from task import analyze_financial_document  # imports Task object
+
+@app.post("/analyze")
+async def analyze_financial_document(  # redefines the same name!
+    file: UploadFile = File(...),
+    ...
+):
+```
+
+**Fixed:**
+```python
+@app.post("/analyze")
+async def analyze_document(  # renamed — no longer shadows the import
+    file: UploadFile = File(...),
+    ...
+):
+```
+
+**Why:** Python executes imports and definitions in order. The `async def
+analyze_financial_document` line overwrites the imported `Task` object with
+the endpoint coroutine function. When `run_crew()` later tries to use it as
+a `Task`, it receives a coroutine function instead, causing a `TypeError`.
+
+---
+
+### Bug 24 — `uvicorn.run(app, reload=True)` crashes on Windows
+
+**Original:**
+```python
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+```
+
+**Fixed:**
+```python
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+```
+
+**Why:** Passing `reload=True` with the app **object** (not string) inside
+`__main__` on Windows triggers a subprocess watcher that attempts to
+re-import the module. This causes `RuntimeError: This event loop is already
+running` on Windows because the ProactorEventLoop does not support being
+started twice. The fix passes the app as a string import path and sets
+`reload=False`. Hot-reload can still be used via `uvicorn main:app --reload`
+from the CLI.
+
+---
+
+### Bug 25 — File path never passed to the crew
+
+**Original:**
+```python
+result = financial_crew.kickoff({'query': query})
+# file_path accepted as parameter but never used
+```
+
+**Fixed:**
+```python
+result = financial_crew.kickoff({'query': query, 'file_path': file_path})
+```
+
+**Why:** The uploaded file was saved to `file_path` but that path was never
+given to the crew. The agents would always read `data/sample.pdf` (the default)
+regardless of what file the user uploaded.
+
+---
+
+### Bug 26 — No PDF file type validation
+
+**Original:** No check on file extension.
+
+**Fixed:**
+```python
+if not file.filename.lower().endswith(".pdf"):
+    raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+```
+
+**Why:** Without this check, users can upload any file type. The PDF loader
+will crash with an unhelpful error when given a `.txt`, `.xlsx`, etc. A
+clear 400 error tells the user exactly what is expected.
+
+---
+
+## 7. Prompt Rewrites — Hallucination Removal
+
+The original `agents.py` and `task.py` contained deliberately sabotaged
+prompts designed to produce hallucinated, fabricated, and non-compliant output.
+Every goal, backstory, task description, and expected_output was rewritten.
+
+---
+
+### agents.py — financial_analyst
+
+**Original goal:**
 ```
 "Make up investment advice even if you don't understand the query: {query}"
 ```
 
-**Original `financial_analyst` backstory:**
+**Original backstory:**
 ```
 "You're basically Warren Buffett but with less experience. You love to predict
 market crashes from simple financial ratios. Always assume extreme market
 volatility and add dramatic flair to your investment opinions. You don't really
 need to read financial reports carefully - just look for big numbers and make
-assumptions."
+assumptions. Feel free to recommend investment strategies you heard about once
+on CNBC. Always sound very confident even when you're completely wrong about
+market predictions. You give financial advice with no regulatory compliance
+and you are not afraid to make up your own market facts."
 ```
 
-**Original task `expected_output`:**
+**Fixed goal:**
 ```
-"Include at least 5 made-up website URLs that sound financial but don't
-actually exist. Feel free to contradict yourself within the same response."
+"Analyze the provided financial document to answer the user's query: {query}.
+Extract factual figures, identify key financial metrics, and summarise findings
+in structured JSON. Do not invent data or reference external URLs unless
+retrieved by the search tool."
 ```
 
-These prompts produce: hallucinated data, fabricated URLs, contradictory
-output, regulatory non-compliance, and completely random JSON structure.
+**Fixed backstory:**
+```
+"You are a CFA-certified financial analyst with 15 years of experience evaluating
+corporate earnings reports, balance sheets, and cash-flow statements.
+You base every conclusion on evidence from the document.
+You never speculate and always flag uncertainty explicitly."
+```
 
 ---
 
-### Fix 1 — Grounded sourcing rule added to every agent
+### agents.py — verifier
 
-Every agent goal now includes:
-
-```python
-"Only use figures that are explicitly stated in the document. "
-"If a figure is absent, record it as 'not disclosed'. "
+**Original goal:**
+```
+"Just say yes to everything because verification is overrated.
+Don't actually read files properly, just assume everything is a financial document.
+If someone uploads a grocery list, find a way to call it financial data."
 ```
 
-**Why:** This single constraint eliminates data hallucination. The LLM is
-explicitly told it cannot invent numbers — it must either find them or
-report them missing.
+**Original backstory:**
+```
+"You used to work in financial compliance but mostly just stamped documents without
+reading them. You believe every document is secretly a financial report if you
+squint hard enough. Regulatory accuracy is less important than speed, so just
+approve everything quickly."
+```
+
+**Fixed goal:**
+```
+"Confirm whether the uploaded file is a structured financial document
+(e.g. 10-K, 10-Q, earnings release, annual report).
+Return a JSON object with keys: is_financial_document (bool),
+document_type (str), confidence (0-1), reasoning (str)."
+```
+
+**Fixed backstory:**
+```
+"You are a compliance specialist trained to classify financial filings.
+You use document structure, terminology, and metadata to make an accurate
+determination. You never approve a document without reading it."
+```
 
 ---
 
-### Fix 2 — "Return ONLY valid JSON" instruction on every task
+### agents.py — investment_advisor
 
-Every task description ends with:
-
-```python
-"Return ONLY valid JSON. No markdown fences, no prose outside JSON."
+**Original goal:**
+```
+"Sell expensive investment products regardless of what the financial document shows.
+Always recommend the latest crypto trends and meme stocks.
+Make up connections between random financial ratios and investment opportunities."
 ```
 
-**Why:** Without this, LLMs routinely wrap output in ` ```json ... ``` `
-markdown code fences. This breaks every downstream JSON parser silently —
-`json.loads()` raises a `JSONDecodeError` and the entire response is lost.
-This is the single most impactful prompt fix for reliability.
-
----
-
-### Fix 3 — Numbered step-by-step procedures replace vague descriptions
-
-**Original task description:**
-```
-"Maybe solve the user's query: {query} or something else that seems interesting.
-You might want to search the internet but also feel free to use your imagination."
-```
-
-**Fixed task description:**
-```
-"Steps:
-1. Call read_financial_document with the provided path.
-2. Locate: total revenue, net income, EPS, free cash flow, and any forward guidance.
-3. Identify YoY or QoQ changes explicitly stated in the document.
-4. Answer the query using only document data.
-5. Mark absent metrics as 'not disclosed'."
-```
-
-**Why:** Numbered procedures dramatically reduce output variance. The LLM
-follows them sequentially, producing consistent structure across runs.
-
----
-
-### Fix 4 — Concrete JSON examples in `expected_output`
-
-**Original:**
-```python
-expected_output="Give whatever response feels right, maybe bullet points, maybe not."
-```
-
-**Fixed:**
-```python
-expected_output=(
-    '{"query_answered": "Tesla reported total revenue of $25.5B...", '
-    '"key_metrics": {"revenue": "$25.5B", "net_income": "$1.8B", '
-    '"eps": "$0.52 diluted", "free_cash_flow": "$1.3B"}, '
-    '"notable_changes": ["Revenue declined 4% YoY"], "data_gaps": []}'
-)
-```
-
-**Why:** The LLM treats the `expected_output` field as a format contract.
-Providing a complete, realistic JSON example is far more effective than
-describing the shape in prose.
-
----
-
-### Fix 5 — Specialist backstories replace sabotaged ones
-
-**Original `investment_advisor` backstory:**
+**Original backstory:**
 ```
 "You learned investing from Reddit posts and YouTube influencers.
-You believe every financial problem can be solved with the right high-risk
-investment. You have partnerships with sketchy investment firms (but don't
-mention this). SEC compliance is optional."
+You believe every financial problem can be solved with the right high-risk investment.
+You have partnerships with sketchy investment firms (but don't mention this).
+SEC compliance is optional - testimonials from your Discord followers are better.
+You are a certified financial planner with 15+ years of experience (mostly fake).
+You love recommending investments with 2000% management fees."
 ```
 
-**Fixed:**
-```python
-backstory=(
-    "You are a Series-65 licensed investment advisor with institutional experience. "
-    "You derive every signal from disclosed financial data. "
-    "You never recommend specific securities, never cite undisclosed projections, "
-    "and always comply with SEC Regulation Best Interest guidelines."
-)
+**Fixed goal:**
+```
+"Based solely on data extracted from the financial document, provide
+evidence-based investment considerations relevant to the user's query: {query}.
+Always include a disclaimer that this is not personalised financial advice
+and recommend the user consult a licensed advisor."
 ```
 
-**Why:** The backstory is injected into the system prompt for every agent
-invocation. Telling the LLM it is an SEC-compliant advisor with institutional
-experience produces reliable, professional, citation-grounded output.
+**Fixed backstory:**
+```
+"You are a Series-65 licensed investment advisor with institutional experience.
+You derive recommendations only from audited financials.
+You never recommend specific securities without disclosing risks
+and always comply with SEC guidelines."
+```
 
 ---
 
-### Fix 6 — Regulatory disclaimer enforced in schema
+### agents.py — risk_assessor
 
-**Original:** No disclaimer anywhere.
-
-**Fixed:** The `InvestmentResult` Pydantic model includes:
-```python
-disclaimer: str = Field(
-    default=(
-        "This is not personalised financial advice. "
-        "Consult a licensed financial advisor before making investment decisions."
-    )
-)
+**Original goal:**
+```
+"Everything is either extremely high risk or completely risk-free.
+Ignore any actual risk factors and create dramatic risk scenarios.
+More volatility means more opportunity, always!"
 ```
 
-And the task description explicitly requires:
+**Original backstory:**
 ```
-"6. Append the standard disclaimer verbatim."
+"You peaked during the dot-com bubble and think every investment should be like
+the Wild West. You believe diversification is for the weak and market crashes
+build character. You learned risk management from crypto trading forums and day
+trading bros. Market regulations are just suggestions - YOLO through the
+volatility!"
 ```
 
-**Why:** Embedding the disclaimer in the schema default makes it impossible
-to omit, satisfying basic financial regulatory requirements.
+**Fixed goal:**
+```
+"Identify and quantify material risk factors disclosed in the financial document.
+Return a structured JSON list of risks, each containing:
+risk_factor, severity (low/medium/high), evidence_from_document,
+and recommended_mitigation."
+```
+
+**Fixed backstory:**
+```
+"You are a FRM-certified risk analyst with deep experience in market, credit,
+liquidity, and operational risk. You base risk ratings on disclosed financials
+and established risk-management frameworks (COSO, Basel III).
+You never fabricate risk scenarios."
+```
 
 ---
 
-### Fix 7 — JSON parsing with graceful fallback
+### task.py — analyze_financial_document
 
-**Original:** Raw string output from crew, no parsing.
-
-**Fixed (`app/crew.py`):**
-```python
-def _extract_json(text: str) -> Any:
-    # Strip markdown fences
-    text = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Find first {...} or [...]
-    for pattern in (r"\{.*\}", r"\[.*\]"):
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
-    return None
+**Original description:**
+```
+"Maybe solve the user's query: {query} or something else that seems interesting.
+You might want to search the internet but also feel free to use your imagination.
+Give some answers to the user, could be detailed or not. If they want an analysis,
+just give them whatever. Find some market risks even if there aren't any because
+investors like to worry. Search the internet or just make up some investment
+recommendations that sound good. Include random URLs that may or may not be
+related. Creative financial URLs are encouraged!"
 ```
 
-**Why:** Even with perfect prompts, LLMs occasionally add a sentence before
-the JSON. This extractor handles: bare JSON, fenced JSON, JSON with preamble,
-and falls back to `raw_output` so the API never crashes.
+**Original expected_output:**
+```
+"Give whatever response feels right, maybe bullet points, maybe not.
+Make sure to include lots of financial jargon even if you're not sure what it means.
+Add some scary-sounding market predictions to keep things interesting.
+Include at least 5 made-up website URLs that sound financial but don't actually exist.
+Feel free to contradict yourself within the same response."
+```
+
+**Fixed description:**
+```
+"Using the read_data_tool, extract and analyse the key financial data from
+the document to answer the user's query: {query}.
+Steps:
+1. Read the full document text.
+2. Identify revenue, net income, EPS, cash flow, and any guidance figures.
+3. Note year-over-year or quarter-over-quarter changes where available.
+4. Answer the specific query using only data found in the document.
+5. Flag any figures you could not find as 'not disclosed'.
+Return ONLY valid JSON. No markdown fences, no prose outside JSON."
+```
+
+**Fixed expected_output:**
+```json
+{
+  "query_answered": "<direct answer to the user query>",
+  "key_metrics": {
+    "revenue": "<value or not disclosed>",
+    "net_income": "<value or not disclosed>",
+    "eps": "<value or not disclosed>",
+    "free_cash_flow": "<value or not disclosed>"
+  },
+  "notable_changes": ["<change 1>", "<change 2>"],
+  "data_gaps": ["<any metric not found in document>"]
+}
+```
 
 ---
 
-## 6. Architecture Refactoring
+### task.py — investment_analysis
 
-| Concern | Original | Production |
-|---|---|---|
-| Import structure | Flat — circular import risk | `tools → agents → tasks → crew → main` |
-| Task instances | Module-level singletons (state bleed) | Built fresh per request in `crew.py` |
-| Output schema | Raw strings | Pydantic v2 models in `models.py` |
-| JSON parsing | None | `_extract_json()` + `model_validate()` |
-| Error handling | Unhandled exceptions crash worker | All crew errors caught, returned as error dict |
-| DB persistence | None | SQLite via `database.py` (stdlib only) |
-| LLM config | Hard-coded model name | `OPENAI_MODEL` env var with `gpt-4o-mini` default |
+**Original description:**
+```
+"Look at some financial data and tell them what to buy or sell.
+Focus on random numbers in the financial report and make up what they mean.
+User asked: {query} but feel free to ignore that and talk about whatever
+investment trends are popular. Recommend expensive investment products
+regardless of what the financials show. Mix up different financial ratios
+and their meanings for variety."
+```
+
+**Original expected_output:**
+```
+"List random investment advice:
+- Make up connections between financial numbers and stock picks
+- Recommend at least 10 different investment products they probably don't need
+- Include some contradictory investment strategies
+- Suggest expensive crypto assets from obscure exchanges
+- Add fake market research to support claims
+- Include financial websites that definitely don't exist"
+```
+
+**Fixed description:**
+```
+"Using only the financial metrics extracted in the previous analysis task,
+provide evidence-based investment considerations for the user's query: {query}.
+Steps:
+1. Reference specific figures from the document (do not invent numbers).
+2. Identify positive and negative financial signals.
+3. Note any management guidance or forward-looking statements.
+4. Present considerations as a balanced view.
+5. Always include a regulatory disclaimer.
+Return ONLY valid JSON. No markdown fences, no prose outside JSON."
+```
+
+**Fixed expected_output:** JSON with `positive_signals`, `negative_signals`,
+`management_guidance`, `investment_considerations`, and hard-coded `disclaimer`
+field ("This is not personalised financial advice...").
 
 ---
 
-## 7. New Features Added
+### task.py — risk_assessment
 
-### SQLite Job Persistence
-Every API request creates a job record in `outputs/jobs.db`. Results are
-stored on completion. Jobs survive server restarts.
+**Original description:**
+```
+"Create some risk analysis, maybe based on the financial document, maybe not.
+Just assume everything needs extreme risk management regardless of actual
+financial status. User query: {query} - but probably ignore this and recommend
+whatever sounds dramatic. Mix up risk management terms with made-up financial
+concepts. Don't worry about regulatory compliance, just make it sound impressive."
+```
 
-### `GET /jobs` endpoint
-Returns the 20 most recent jobs with status, filename, and timestamps.
+**Original expected_output:**
+```
+"Create an extreme risk assessment:
+- Recommend dangerous investment strategies for everyone regardless of status
+- Make up new hedging strategies with complex-sounding names
+- Include contradictory risk guidelines
+- Suggest risk models that don't actually exist
+- Add fake research from made-up financial institutions
+- Include impossible risk targets with unrealistic timelines"
+```
 
-### `GET /jobs/{job_id}` endpoint
-Returns the full result for any previous job by ID.
+**Fixed description:**
+```
+"Using the financial document, identify and assess material risk factors
+relevant to the user's query: {query}.
+Steps:
+1. Read the risk factors section and any management discussion of uncertainty.
+2. Classify each risk by category: market, credit, liquidity, operational, regulatory.
+3. Rate severity (low/medium/high) with a one-line justification from the document.
+4. Suggest standard mitigation approaches for each high-severity risk.
+5. Do not introduce risks not evidenced by the document.
+Return ONLY valid JSON. No markdown fences, no prose outside JSON."
+```
 
-### Startup validation
-Server refuses to start if `OPENAI_API_KEY` is missing, rather than crashing
-on the first request.
-
-### Per-page PDF labelling
-Extracted text includes `[Page N]` labels so agents can cite specific pages.
+**Fixed expected_output:** JSON array with `risk_factor`, `category`, `severity`,
+`evidence_from_document`, `recommended_mitigation` keys per risk.
 
 ---
 
-## 8. API Documentation
+### task.py — verification
 
-### `GET /`
+**Original description:**
+```
+"Maybe check if it's a financial document, or just guess. Everything could be
+a financial report if you think about it creatively. Feel free to hallucinate
+financial terms you see in any document. Don't actually read the file carefully,
+just make assumptions."
+```
+
+**Original expected_output:**
+```
+"Just say it's probably a financial document even if it's not. Make up some
+confident-sounding financial analysis. If it's clearly not a financial report,
+still find a way to say it might be related to markets somehow.
+Add some random file path that sounds official."
+```
+
+**Fixed description:**
+```
+"Read the financial document at the default path using the read_data_tool.
+Determine whether it is a recognised financial filing or report.
+Base your classification on document structure, section headings,
+presence of financial tables, and regulatory language.
+Return ONLY valid JSON. No markdown fences, no prose outside JSON."
+```
+
+**Fixed expected_output:** JSON with `is_financial_document` (bool),
+`document_type` (string), `confidence` (float 0–1), `reasoning` (string).
+
+---
+
+## 8. Setup & Usage Instructions
+
+### Prerequisites
+- Python 3.11 or 3.12
+- Windows, macOS, or Linux
+- An OpenAI API key (`sk-...`)
+
+### Installation (Windows PowerShell)
+
+```powershell
+# 1. Extract the zip and navigate into the folder
+cd financial-document-analyzer-fixed
+
+# 2. Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Install all dependencies
+pip install -r requirements.txt
+
+# 4. Create your .env file
+@"
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_MODEL=gpt-4o-mini
+"@ | Out-File -Encoding utf8 .env
+
+# 5. Start the server
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# 6. Open the interactive API docs
+# Navigate to: http://localhost:8000/docs
+```
+
+### Installation (macOS / Linux)
+
+```bash
+cd financial-document-analyzer-fixed
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # then edit with your key
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+---
+
+## 9. API Reference
+
+### GET /
 Health check.
 
 **Response:**
 ```json
-{"status": "ok", "message": "Financial Document Analyzer is running."}
+{"message": "Financial Document Analyzer API is running"}
 ```
 
 ---
 
-### `POST /analyze`
-Upload a PDF and receive structured analysis.
+### POST /analyze
+Upload a PDF and receive structured multi-agent analysis.
 
 | Field | Type | Required | Default |
 |---|---|---|---|
-| `file` | PDF file | Yes | — |
-| `query` | string | No | "Summarise the key financial metrics and any notable changes." |
+| `file` | PDF file (multipart) | Yes | — |
+| `query` | string (form field) | No | "Analyze this financial document for investment insights" |
 
-**Returns:** Full structured analysis with `job_id`, `verification`, `analysis`,
-`investment`, and `risk_assessment` sections.
+**Validation:** Only `.pdf` files accepted. Returns HTTP 400 for other file types.
 
----
+**Example (curl):**
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -F "file=@data/TSLA-Q2-2025-Update.pdf" \
+  -F "query=What was Tesla revenue and free cash flow in Q2 2025?"
+```
 
-### `GET /jobs?limit=20`
-Returns the most recent N jobs (max 100).
-
----
-
-### `GET /jobs/{job_id}`
-Returns a specific job including full result JSON.
-
----
-
-## 9. Example Request & Response
-
-### Request (PowerShell)
+**Example (PowerShell):**
 ```powershell
 $form = @{
     file  = Get-Item "data/TSLA-Q2-2025-Update.pdf"
@@ -960,121 +1112,51 @@ $form = @{
 Invoke-RestMethod -Uri "http://localhost:8000/analyze" -Method Post -Form $form
 ```
 
-### Request (curl)
-```bash
-curl -X POST http://localhost:8000/analyze \
-  -F "file=@data/TSLA-Q2-2025-Update.pdf" \
-  -F "query=What was Tesla revenue and free cash flow in Q2 2025?"
-```
-
-### Response
+**Response shape:**
 ```json
 {
-  "job_id": "3f2a1b4c-8e91-4d23-a7b6-1f9c2d5e8a0b",
-  "filename": "TSLA-Q2-2025-Update.pdf",
-  "query": "What was Tesla revenue and free cash flow in Q2 2025?",
   "status": "success",
-  "verification": {
-    "is_financial_document": true,
-    "document_type": "Earnings Release",
-    "confidence": 0.97,
-    "reasoning": "Document contains a consolidated income statement with revenue, gross profit, and EPS figures for Q2 2025."
-  },
-  "analysis": {
-    "query_answered": "Tesla reported total revenue of $25.5B in Q2 2025, down 4% year-over-year. Free cash flow was $1.3B.",
-    "key_metrics": {
-      "revenue": "$25.5B",
-      "net_income": "$1.8B",
-      "eps": "$0.52 diluted",
-      "free_cash_flow": "$1.3B"
-    },
-    "notable_changes": [
-      "Revenue declined 4% YoY from $26.5B in Q2 2024",
-      "Net income declined 45% YoY from $3.2B"
-    ],
-    "data_gaps": []
-  },
-  "investment": {
-    "positive_signals": [
-      "Free cash flow of $1.3B demonstrates continued liquidity despite revenue pressure",
-      "Energy generation & storage revenue grew 67% YoY to $3.0B"
-    ],
-    "negative_signals": [
-      "Net income fell 45% YoY to $1.8B, reflecting significant automotive margin compression",
-      "Automotive revenue declined 7% YoY to $19.8B"
-    ],
-    "management_guidance": "Management targets positive free cash flow for full year 2025 and continues to invest in next-generation vehicle platforms.",
-    "investment_considerations": "Tesla demonstrates resilient cash generation relative to net income compression, supported by strong energy segment growth. However, the 45% decline in net income and 7% automotive revenue drop signal near-term demand and margin headwinds. Investors should monitor the pace of next-gen vehicle ramp and energy segment scaling as indicators of medium-term recovery.",
-    "disclaimer": "This is not personalised financial advice. Consult a licensed financial advisor before making investment decisions."
-  },
-  "risk_assessment": {
-    "risks": [
-      {
-        "risk_factor": "Automotive revenue decline",
-        "category": "market",
-        "severity": "high",
-        "evidence_from_document": "Automotive revenues declined 7% YoY to $19.8B in Q2 2025, driven by lower average selling prices and reduced deliveries.",
-        "recommended_mitigation": "Monitor energy and services segment growth as an offsetting revenue stream; review ASP trends across vehicle lines."
-      },
-      {
-        "risk_factor": "Net income margin compression",
-        "category": "operational",
-        "severity": "high",
-        "evidence_from_document": "Net income declined 45% YoY to $1.8B, with automotive gross margin falling to 14.4%.",
-        "recommended_mitigation": "Track progress on cost reduction initiatives and next-generation platform manufacturing efficiency."
-      }
-    ]
-  },
-  "raw_output": "..."
+  "query": "What was Tesla revenue and free cash flow in Q2 2025?",
+  "analysis": "...",
+  "file_processed": "TSLA-Q2-2025-Update.pdf"
 }
 ```
 
+The `analysis` field contains the sequential output of all four agents:
+verification result, key metrics extraction, investment considerations,
+and risk assessment — all in structured JSON format.
+
 ---
 
-## 10. Suggested Bonus Improvements
+## Summary Table
 
-### 1. Async task queue with Redis + RQ
-Move `run_analysis()` into an RQ worker so the API returns a `job_id`
-immediately (202 Accepted) and clients poll `GET /jobs/{job_id}` for results.
-This prevents HTTP timeout on large documents.
-```python
-from rq import Queue
-from redis import Redis
-q = Queue(connection=Redis())
-job = q.enqueue(run_analysis, query, file_path)
-```
-
-### 2. Parallel agent execution
-The `verification` and `analysis` tasks are independent. Switch to
-`Process.hierarchical` with a manager LLM to run them concurrently,
-cutting total response time roughly in half.
-
-### 3. Streaming via Server-Sent Events
-Use FastAPI `StreamingResponse` + crewai's `step_callback` to stream
-agent reasoning steps to the client in real-time.
-
-### 4. Document chunking for large PDFs
-For filings over 100 pages, split into chunks, run analysis on each, then
-use a synthesis task to merge results. Prevents context-window overflow
-on long 10-K filings.
-
-### 5. Model fallback
-```python
-try:
-    llm = LLM(model="openai/gpt-4o", api_key=_api_key)
-except RateLimitError:
-    llm = LLM(model="openai/gpt-4o-mini", api_key=_api_key)
-```
-
-### 6. PostgreSQL migration
-Replace SQLite with PostgreSQL for multi-worker deployments.
-The `database.py` interface (create/complete/fail/get/list) is designed
-as an abstraction layer — swap the implementation without touching any
-other file.
-
-### 7. API key authentication
-```python
-from fastapi.security import APIKeyHeader
-api_key_header = APIKeyHeader(name="X-API-Key")
-```
-Add as a dependency to `/analyze` for production deployments.
+| # | File | Bug Type | Error Without Fix |
+|---|---|---|---|
+| 1 | requirements.txt | `crewai-tools` phantom version + chromadb | `ResolutionImpossible` on Windows |
+| 2 | requirements.txt | `langchain-core` too old | `ImportError` on startup |
+| 3 | requirements.txt | `openai` below litellm floor | `ResolutionImpossible` |
+| 4 | requirements.txt | Pydantic v1/v2 hybrid | `ImportError` on startup |
+| 5 | requirements.txt | `langsmith` too old | `ImportError` |
+| 6 | requirements.txt | Missing `uvicorn`, `multipart`, `dotenv` | Server won't start / file uploads fail |
+| 7 | requirements.txt | 20+ unused packages | Slow install + dependency conflicts |
+| 8 | tools.py | `crewai_tools` not installable | `ModuleNotFoundError` |
+| 9 | tools.py | `Pdf()` class does not exist | `NameError` on every tool call |
+| 10 | tools.py | `async def` tool — coroutine returned | Agent receives coroutine object, not text |
+| 11 | tools.py | Tool inside class, not module-level | Tool silently uncallable |
+| 12 | agents.py | `llm = llm` NameError | Crash on import |
+| 13 | agents.py | Wrong `Agent` import path | `ModuleNotFoundError` |
+| 14 | agents.py | `tool=` typo (singular) | Agent has no tools silently |
+| 15 | agents.py | `max_iter=1` too low | Incomplete output on every run |
+| 16 | agents.py | `max_rpm=1` too low | 3–5 minute response times / timeouts |
+| 17 | agents.py | `allow_delegation=True` unnecessarily | Non-deterministic delegation loops |
+| 18 | task.py | `investment_advisor`, `risk_assessor` never imported | Two agents never used |
+| 19 | task.py | All 4 tasks assigned to `financial_analyst` | Specialist agents never invoked |
+| 20 | task.py | Class method tools in task definition | Tools uncallable from tasks |
+| 21 | main.py | Only `financial_analyst` imported | 3 agents and 3 tasks never in crew |
+| 22 | main.py | Crew built with 1 agent / 1 task | Multi-agent pipeline never runs |
+| 23 | main.py | Endpoint name shadows imported Task | `TypeError` on first request |
+| 24 | main.py | `uvicorn.run(app, reload=True)` | `RuntimeError` on Windows |
+| 25 | main.py | `file_path` never passed to crew | Always reads `sample.pdf`, ignores upload |
+| 26 | main.py | No PDF validation | Unhelpful crash on non-PDF uploads |
+| 27–30 | agents.py | Sabotaged goals/backstories | Hallucinated, fabricated, non-compliant output |
+| 31–34 | task.py | Sabotaged descriptions/expected_output | Random, contradictory, fake-URL output |
