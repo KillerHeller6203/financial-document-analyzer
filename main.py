@@ -1,74 +1,109 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-import os
-import uuid
-import asyncio
+from crewai import Task
+from agents import financial_analyst, verifier, investment_advisor, risk_assessor
+from tools import search_tool, FinancialDocumentTool
 
-from crewai import Crew, Process
-from agents import financial_analyst
-from task import analyze_financial_document
+verification = Task(
+    description=(
+        "Read the financial document at the default path using the read_data_tool. "
+        "Determine whether it is a recognised financial filing or report. "
+        "Base your classification on document structure, section headings, "
+        "presence of financial tables, and regulatory language."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "is_financial_document": true | false,\n'
+        '  "document_type": "<e.g. Earnings Release | 10-Q | Annual Report | Unknown>",\n'
+        '  "confidence": <float 0.0-1.0>,\n'
+        '  "reasoning": "<one sentence citing specific evidence from the document>"\n'
+        "}"
+    ),
+    agent=verifier,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
 
-app = FastAPI(title="Financial Document Analyzer")
+analyze_financial_document = Task(
+    description=(
+        "Using the read_data_tool, extract and analyse the key financial data from "
+        "the document to answer the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Read the full document text.\n"
+        "2. Identify revenue, net income, EPS, cash flow, and any guidance figures.\n"
+        "3. Note year-over-year or quarter-over-quarter changes where available.\n"
+        "4. Answer the specific query using only data found in the document.\n"
+        "5. Flag any figures you could not find as 'not disclosed'."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "query_answered": "<direct answer to the user query>",\n'
+        '  "key_metrics": {\n'
+        '    "revenue": "<value or not disclosed>",\n'
+        '    "net_income": "<value or not disclosed>",\n'
+        '    "eps": "<value or not disclosed>",\n'
+        '    "free_cash_flow": "<value or not disclosed>"\n'
+        "  },\n"
+        '  "notable_changes": ["<change 1>", "<change 2>"],\n'
+        '  "data_gaps": ["<any metric not found in document>"]\n'
+        "}"
+    ),
+    agent=financial_analyst,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
 
-def run_crew(query: str, file_path: str="data/sample.pdf"):
-    """To run the whole crew"""
-    financial_crew = Crew(
-        agents=[financial_analyst],
-        tasks=[analyze_financial_document],
-        process=Process.sequential,
-    )
-    
-    result = financial_crew.kickoff({'query': query})
-    return result
+investment_analysis = Task(
+    description=(
+        "Using only the financial metrics extracted in the previous analysis task, "
+        "provide evidence-based investment considerations for the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Reference specific figures from the document (do not invent numbers).\n"
+        "2. Identify positive and negative financial signals.\n"
+        "3. Note any management guidance or forward-looking statements.\n"
+        "4. Present considerations as a balanced view.\n"
+        "5. Always include a regulatory disclaimer."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "positive_signals": ["<signal with supporting figure>"],\n'
+        '  "negative_signals": ["<signal with supporting figure>"],\n'
+        '  "management_guidance": "<summary or not provided>",\n'
+        '  "investment_considerations": "<balanced 2-3 sentence summary>",\n'
+        '  "disclaimer": "This is not personalised financial advice. '
+        'Consult a licensed financial advisor before making investment decisions."\n'
+        "}"
+    ),
+    agent=investment_advisor,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
 
-@app.get("/")
-async def root():
-    """Health check endpoint"""
-    return {"message": "Financial Document Analyzer API is running"}
-
-@app.post("/analyze")
-async def analyze_financial_document(
-    file: UploadFile = File(...),
-    query: str = Form(default="Analyze this financial document for investment insights")
-):
-    """Analyze financial document and provide comprehensive investment recommendations"""
-    
-    file_id = str(uuid.uuid4())
-    file_path = f"data/financial_document_{file_id}.pdf"
-    
-    try:
-        # Ensure data directory exists
-        os.makedirs("data", exist_ok=True)
-        
-        # Save uploaded file
-        with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        # Validate query
-        if query=="" or query is None:
-            query = "Analyze this financial document for investment insights"
-            
-        # Process the financial document with all analysts
-        response = run_crew(query=query.strip(), file_path=file_path)
-        
-        return {
-            "status": "success",
-            "query": query,
-            "analysis": str(response),
-            "file_processed": file.filename
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing financial document: {str(e)}")
-    
-    finally:
-        # Clean up uploaded file
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass  # Ignore cleanup errors
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+risk_assessment = Task(
+    description=(
+        "Using the financial document, identify and assess material risk factors "
+        "relevant to the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Read the risk factors section and any management discussion of uncertainty.\n"
+        "2. Classify each risk by category: market, credit, liquidity, operational, regulatory.\n"
+        "3. Rate severity (low/medium/high) with a one-line justification from the document.\n"
+        "4. Suggest standard mitigation approaches for each high-severity risk.\n"
+        "5. Do not introduce risks not evidenced by the document."
+    ),
+    expected_output=(
+        "A JSON array of risk objects:\n"
+        "[\n"
+        "  {\n"
+        '    "risk_factor": "<name>",\n'
+        '    "category": "<market | credit | liquidity | operational | regulatory>",\n'
+        '    "severity": "<low | medium | high>",\n'
+        '    "evidence_from_document": "<direct quote or paraphrase>",\n'
+        '    "recommended_mitigation": "<standard industry practice>"\n'
+        "  }\n"
+        "]"
+    ),
+    agent=risk_assessor,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
