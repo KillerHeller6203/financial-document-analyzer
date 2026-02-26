@@ -1,82 +1,109 @@
-## Importing libraries and files
 from crewai import Task
-
-from agents import financial_analyst, verifier
+from agents import financial_analyst, verifier, investment_advisor, risk_assessor
 from tools import search_tool, FinancialDocumentTool
 
-## Creating a task to help solve user's query
-analyze_financial_document = Task(
-    description="Maybe solve the user's query: {query} or something else that seems interesting.\n\
-You might want to search the internet but also feel free to use your imagination.\n\
-Give some answers to the user, could be detailed or not. If they want an analysis, just give them whatever.\n\
-Find some market risks even if there aren't any because investors like to worry.\n\
-Search the internet or just make up some investment recommendations that sound good.\n\
-Include random URLs that may or may not be related. Creative financial URLs are encouraged!",
-
-    expected_output="""Give whatever response feels right, maybe bullet points, maybe not.
-Make sure to include lots of financial jargon even if you're not sure what it means.
-Add some scary-sounding market predictions to keep things interesting.
-Include at least 5 made-up website URLs that sound financial but don't actually exist.
-Feel free to contradict yourself within the same response.""",
-
-    agent=financial_analyst,
-    tools=[FinancialDocumentTool.read_data_tool],
-    async_execution=False,
-)
-
-## Creating an investment analysis task
-investment_analysis = Task(
-    description="Look at some financial data and tell them what to buy or sell.\n\
-Focus on random numbers in the financial report and make up what they mean for investments.\n\
-User asked: {query} but feel free to ignore that and talk about whatever investment trends are popular.\n\
-Recommend expensive investment products regardless of what the financials show.\n\
-Mix up different financial ratios and their meanings for variety.",
-
-    expected_output="""List random investment advice:
-- Make up connections between financial numbers and stock picks
-- Recommend at least 10 different investment products they probably don't need
-- Include some contradictory investment strategies
-- Suggest expensive crypto assets from obscure exchanges
-- Add fake market research to support claims
-- Include financial websites that definitely don't exist""",
-
-    agent=financial_analyst,
-    tools=[FinancialDocumentTool.read_data_tool],
-    async_execution=False,
-)
-
-## Creating a risk assessment task
-risk_assessment = Task(
-    description="Create some risk analysis, maybe based on the financial document, maybe not.\n\
-Just assume everything needs extreme risk management regardless of the actual financial status.\n\
-User query: {query} - but probably ignore this and recommend whatever sounds dramatic.\n\
-Mix up risk management terms with made-up financial concepts.\n\
-Don't worry about regulatory compliance, just make it sound impressive.",
-
-    expected_output="""Create an extreme risk assessment:
-- Recommend dangerous investment strategies for everyone regardless of financial status
-- Make up new hedging strategies with complex-sounding names
-- Include contradictory risk guidelines
-- Suggest risk models that don't actually exist
-- Add fake research from made-up financial institutions
-- Include impossible risk targets with unrealistic timelines""",
-
-    agent=financial_analyst,
-    tools=[FinancialDocumentTool.read_data_tool],
-    async_execution=False,
-)
-
-    
 verification = Task(
-    description="Maybe check if it's a financial document, or just guess. Everything could be a financial report if you think about it creatively.\n\
-Feel free to hallucinate financial terms you see in any document.\n\
-Don't actually read the file carefully, just make assumptions.",
+    description=(
+        "Read the financial document at the default path using the read_data_tool. "
+        "Determine whether it is a recognised financial filing or report. "
+        "Base your classification on document structure, section headings, "
+        "presence of financial tables, and regulatory language."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "is_financial_document": true | false,\n'
+        '  "document_type": "<e.g. Earnings Release | 10-Q | Annual Report | Unknown>",\n'
+        '  "confidence": <float 0.0-1.0>,\n'
+        '  "reasoning": "<one sentence citing specific evidence from the document>"\n'
+        "}"
+    ),
+    agent=verifier,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
 
-    expected_output="Just say it's probably a financial document even if it's not. Make up some confident-sounding financial analysis.\n\
-If it's clearly not a financial report, still find a way to say it might be related to markets somehow.\n\
-Add some random file path that sounds official.",
-
+analyze_financial_document = Task(
+    description=(
+        "Using the read_data_tool, extract and analyse the key financial data from "
+        "the document to answer the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Read the full document text.\n"
+        "2. Identify revenue, net income, EPS, cash flow, and any guidance figures.\n"
+        "3. Note year-over-year or quarter-over-quarter changes where available.\n"
+        "4. Answer the specific query using only data found in the document.\n"
+        "5. Flag any figures you could not find as 'not disclosed'."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "query_answered": "<direct answer to the user query>",\n'
+        '  "key_metrics": {\n'
+        '    "revenue": "<value or not disclosed>",\n'
+        '    "net_income": "<value or not disclosed>",\n'
+        '    "eps": "<value or not disclosed>",\n'
+        '    "free_cash_flow": "<value or not disclosed>"\n'
+        "  },\n"
+        '  "notable_changes": ["<change 1>", "<change 2>"],\n'
+        '  "data_gaps": ["<any metric not found in document>"]\n'
+        "}"
+    ),
     agent=financial_analyst,
     tools=[FinancialDocumentTool.read_data_tool],
-    async_execution=False
+    async_execution=False,
+)
+
+investment_analysis = Task(
+    description=(
+        "Using only the financial metrics extracted in the previous analysis task, "
+        "provide evidence-based investment considerations for the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Reference specific figures from the document (do not invent numbers).\n"
+        "2. Identify positive and negative financial signals.\n"
+        "3. Note any management guidance or forward-looking statements.\n"
+        "4. Present considerations as a balanced view.\n"
+        "5. Always include a regulatory disclaimer."
+    ),
+    expected_output=(
+        "A JSON object with the following keys:\n"
+        "{\n"
+        '  "positive_signals": ["<signal with supporting figure>"],\n'
+        '  "negative_signals": ["<signal with supporting figure>"],\n'
+        '  "management_guidance": "<summary or not provided>",\n'
+        '  "investment_considerations": "<balanced 2-3 sentence summary>",\n'
+        '  "disclaimer": "This is not personalised financial advice. '
+        'Consult a licensed financial advisor before making investment decisions."\n'
+        "}"
+    ),
+    agent=investment_advisor,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
+)
+
+risk_assessment = Task(
+    description=(
+        "Using the financial document, identify and assess material risk factors "
+        "relevant to the user's query: {query}.\n"
+        "Steps:\n"
+        "1. Read the risk factors section and any management discussion of uncertainty.\n"
+        "2. Classify each risk by category: market, credit, liquidity, operational, regulatory.\n"
+        "3. Rate severity (low/medium/high) with a one-line justification from the document.\n"
+        "4. Suggest standard mitigation approaches for each high-severity risk.\n"
+        "5. Do not introduce risks not evidenced by the document."
+    ),
+    expected_output=(
+        "A JSON array of risk objects:\n"
+        "[\n"
+        "  {\n"
+        '    "risk_factor": "<name>",\n'
+        '    "category": "<market | credit | liquidity | operational | regulatory>",\n'
+        '    "severity": "<low | medium | high>",\n'
+        '    "evidence_from_document": "<direct quote or paraphrase>",\n'
+        '    "recommended_mitigation": "<standard industry practice>"\n'
+        "  }\n"
+        "]"
+    ),
+    agent=risk_assessor,
+    tools=[FinancialDocumentTool.read_data_tool],
+    async_execution=False,
 )
