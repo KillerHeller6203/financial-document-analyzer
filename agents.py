@@ -7,7 +7,7 @@ from tools import search_tool, FinancialDocumentTool
 
 llm = LLM(
     model="openai/gpt-4o-mini",
-    api_key=os.getenv("OPENAI_API_KEY"),
+    api_key=os.getenv("key"),
 )
 
 financial_analyst = Agent(
