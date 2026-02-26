@@ -1,60 +1,67 @@
-## Importing libraries and files
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-from crewai_tools import tools
-from crewai_tools.tools.serper_dev_tool import SerperDevTool
+from crewai.tools import tool
+from duckduckgo_search import DDGS
+from langchain_community.document_loaders import PyPDFLoader
 
-## Creating search tool
-search_tool = SerperDevTool()
 
-## Creating custom pdf reader tool
-class FinancialDocumentTool():
-    async def read_data_tool(path='data/sample.pdf'):
-        """Tool to read data from a pdf file from a path
+## Web search tool — DuckDuckGo (no API key, no chromadb, works on Windows)
+@tool("Search the web")
+def search_tool(query: str) -> str:
+    """Search the web for current financial information using DuckDuckGo.
+
+    Args:
+        query: The search query string.
+
+    Returns:
+        Concatenated search result snippets.
+    """
+    try:
+        results = DDGS().text(query, max_results=5)
+        return "\n".join(r["body"] for r in results) if results else "No results found."
+    except Exception as e:
+        return f"Search failed: {str(e)}"
+
+
+## PDF reader tool
+class FinancialDocumentTool:
+    """Reads and returns the full text of a PDF financial document."""
+
+    @staticmethod
+    @tool("Read financial document")
+    def read_data_tool(path: str = "data/sample.pdf") -> str:
+        """Read all pages from a PDF file and return concatenated text.
 
         Args:
-            path (str, optional): Path of the pdf file. Defaults to 'data/sample.pdf'.
+            path: Path to the PDF file. Defaults to 'data/sample.pdf'.
 
         Returns:
-            str: Full Financial Document file
+            Full text content of the financial document.
         """
-        
-        docs = Pdf(file_path=path).load()
+        if not os.path.exists(path):
+            return f"ERROR: File not found at path '{path}'"
 
-        full_report = ""
-        for data in docs:
-            # Clean and format the financial document data
-            content = data.page_content
-            
-            # Remove extra whitespaces and format properly
-            while "\n\n" in content:
-                content = content.replace("\n\n", "\n")
-                
-            full_report += content + "\n"
-            
-        return full_report
+        loader = PyPDFLoader(file_path=path)
+        pages = loader.load()
 
-## Creating Investment Analysis Tool
+        parts = []
+        for page in pages:
+            content = page.page_content.strip()
+            if content:
+                parts.append(content)
+
+        return "\n\n".join(parts) if parts else "No text content found in document."
+
+
 class InvestmentTool:
-    async def analyze_investment_tool(financial_document_data):
-        # Process and analyze the financial document data
-        processed_data = financial_document_data
-        
-        # Clean up the data format
-        i = 0
-        while i < len(processed_data):
-            if processed_data[i:i+2] == "  ":  # Remove double spaces
-                processed_data = processed_data[:i] + processed_data[i+1:]
-            else:
-                i += 1
-                
-        # TODO: Implement investment analysis logic here
-        return "Investment analysis functionality to be implemented"
+    @staticmethod
+    def analyze_investment_tool(financial_document_data: str) -> str:
+        return "Investment analysis functionality to be implemented."
 
-## Creating Risk Assessment Tool
+
 class RiskTool:
-    async def create_risk_assessment_tool(financial_document_data):        
-        # TODO: Implement risk assessment logic here
-        return "Risk assessment functionality to be implemented"
+    @staticmethod
+    def create_risk_assessment_tool(financial_document_data: str) -> str:
+        return "Risk assessment functionality to be implemented."
